@@ -1,0 +1,15 @@
+MotorControl.c:40:6:initialize_PID_constants	8	static
+MotorControl.c:52:6:coil_AC	16	static
+MotorControl.c:62:6:coil_AB	16	static
+MotorControl.c:72:6:coil_CB	16	static
+MotorControl.c:82:6:coil_CA	16	static
+MotorControl.c:92:6:coil_BA	16	static
+MotorControl.c:102:6:coil_BC	16	static
+MotorControl.c:113:6:motor_control	16	static
+MotorControl.c:181:6:cur_sector	8	static
+MotorControl.c:189:6:HAL_GPIO_EXTI_Callback	16	static
+MotorControl.c:208:6:calculateSpeed	8	static
+MotorControl.c:215:6:calculatePID	16	static
+MotorControl.c:226:6:HAL_TIM_PeriodElapsedCallback	16	static
+MotorControl.c:243:6:loop	4	static
+MotorControl.c:250:6:start	8	static
