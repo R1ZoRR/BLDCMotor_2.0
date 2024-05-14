@@ -113,7 +113,6 @@ int main(void)
   MX_USART3_UART_Init();
   MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
-  initialize_PID_constants();
   start();
 
   /* USER CODE END 2 */

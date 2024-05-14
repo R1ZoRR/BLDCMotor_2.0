@@ -9,7 +9,6 @@
 #include "stdbool.h"
 
 #define M_PI 				  3.14159265358979323846
-#define TIME_INTERVAL_MS 	  50
 #define NUMBER_OF_POLE 		  4
 #define GEAR_RATIO	   		  28
 
@@ -20,7 +19,7 @@ uint8_t step = 0;
 
 float U_PWM, V_PWM, W_PWM; // ШИМ на обмотках
 
-uint16_t pwm = 3751;//2650;	//для тестов //2600 - порог минимальной скорости вращения? Потребление 0.14А
+uint16_t pwm = 2650; //2650 - для тестов; 2600 - порог минимальной скорости вращения? Потребление 0.14А; 3750 - Максимальный ШИМ. Огромный ток.
 
 bool START_FLAG = 0;
 
@@ -29,13 +28,14 @@ float K = 3.5;
 float Kp;// = 1.1;// = 0.6 * K;
 float Ki;// = 0.4;// = (2 * Kp)/50;
 float Kd;// = 0.6;// = (Kp * 50)/8;
+float TIME_INTERVAL_MS = 50; // Интервал расчета ПИД
 
-float targetRPM = 30;
+float targetRPM = 15;
 float currentSpeed = 0.0;     // текущая скорость в RPM
 float error, lastError;
 float integral, derivative;
 
-float time_50_ms = 0;
+float pid_time = 0;
 
 void initialize_PID_constants() {
 	Kp = 0.6 * K;
@@ -49,6 +49,208 @@ uint16_t cnt_hall_last = 0;
 
 /////////////////////////////////
 
+// Функция изменяет ШИМ в соответсвии с указанным вектором тяги
+void move_rotor(float to_angle) {
+	// Расчет потенциалов и заполнения шима для фаз
+	U_PWM = pwm*(sin((to_angle) * M_PI/180));
+	V_PWM = pwm*(sin((to_angle+120) * M_PI/180));
+	W_PWM = pwm*(sin((to_angle+240) * M_PI/180));
+
+	TIM1->CCR1 = 0;
+	TIM1->CCR2 = 0;
+	TIM8->CCR1 = 0;
+
+	/////////////////////////////////
+	// Перенастройка шима на фазах
+
+	if(U_PWM >= 0) { // if, т. к. позитивными и негативными ключами управляют разные каналы таймеров
+		HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
+		TIM1->CCR1 = U_PWM;
+		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+	}
+	else {
+		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+		TIM1->CCR1 = -U_PWM;
+		HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
+	}
+
+	if(V_PWM >= 0) {
+		HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
+		TIM1->CCR2 = V_PWM;
+		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
+	}
+	else {
+		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
+		TIM1->CCR2 = -V_PWM;
+		HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
+	}
+
+	if(W_PWM >= 0) {
+		HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
+		TIM8->CCR1 = W_PWM;
+		HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
+	}
+	else {
+		HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
+		TIM8->CCR1 = -W_PWM;
+		HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_1);
+	}
+
+	// Сброс счетчиков таймеров для синхронизации
+	TIM1->CNT = 0;
+	TIM8->CNT = 0;
+	return;
+}
+
+// Функция, управляющая последовательностью переключением обмоток двигателя
+float offset = 0;
+void motor_control(uint8_t command, uint16_t pwm) {
+	switch (command) {
+		case Eright:
+			switch (step) {
+			case 0b101:
+				move_rotor(0 + offset);
+				break;
+			case 0b100:
+				move_rotor(60 + offset);
+				break;
+			case 0b110:
+				move_rotor(120 + offset);
+				break;
+			case 0b010:
+				move_rotor(180 + offset);
+				break;
+			case 0b011:
+				move_rotor(240 + offset);
+				break;
+			case 0b001:
+				move_rotor(300 + offset);
+				break;
+
+			default:
+				break;
+			}
+			break;
+
+		case Estop:
+			HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+			HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
+
+			HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
+			HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
+
+			HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
+			HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
+			break;
+//		case Eleft: 		//НЕ РАБОТАЕТ. НАДО ПОДУМАТЬ КАКИМ ОБРАЗОМ СДЕЛАТЬ
+//			switch (step) {
+//			case 0b100:
+//				coil_BC(pwm); 	// A+1 B-0.5 C0
+//				break;
+//			case 0b101:
+//				coil_BA(pwm);	// A+0.5 B0 C-1
+//				break;
+//			case 0b001:
+//				coil_CA(pwm); 	// A0 B+1 C-0.5
+//				break;
+//			case 0b011:
+//				coil_CB(pwm);	// A-1 B+0.5 C0
+//				break;
+//			case 0b010:
+//				coil_AB(pwm); 	// A-0.5 B0 C+1
+//				break;
+//			case 0b110:
+//				coil_AC(pwm); 	// A0 B-1 C+0.5
+//				break;
+//			default:
+//				break;
+//			}
+//
+//			break;
+
+		default:
+			break;
+	}
+}
+
+// Чтение показателей датчиков Холла
+void cur_sector() {
+	hal_U = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_5);
+	hal_V = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_0);
+	hal_W = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_1);
+	step = (hal_W) | (hal_V << 1) | (hal_U << 2);
+}
+
+
+// Обработчик прерываний датчиков Холла
+float currnetAngle = 0;
+float angle = 0;
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	switch(GPIO_Pin) {
+	case GPIO_PIN_5:
+	case GPIO_PIN_0:
+	case GPIO_PIN_1:
+		if (START_FLAG!=0){
+			cnt_hall += 1;
+			angle = currnetAngle;
+			cur_sector();
+			motor_control(Eright, pwm);
+		}
+		break;
+	}
+}
+
+#define PULSES_PER_REVOLUTION 	6
+#define GEAR_RATIO 				28 // Передаточное число
+#define STEPS_REDUCER 			2
+
+void calculateSpeed() {
+	currentSpeed = cnt_hall * 60 / (336 * pid_time / 1000); // Текущая скорость в об/мин. Расчет: cnt_hall * 3.571428 = 60 c * cnt_hall / 16.8 = , где  16.8 = 336 * 0.05 - кол-во прерываний датчика холла за 0.05 с, для вращения со скоростью 1 об/с
+	cnt_hall = 0; // Сброс счетчика импульсов
+}
+
+void calculatePID() {
+    error = targetRPM - currentSpeed;
+    integral += error;
+    derivative = error - lastError;
+
+    pwm = Kp*error + Ki*integral + Kd*derivative;
+    if (pwm > 3751) pwm = 3751;
+    if (pwm < 0) pwm = 2700;
+    lastError = error;
+}
+
+bool angleFlag = 0;
+// Обработчик прерываний таймера
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
+	if (htim == &htim14) {
+		pid_time += 0.5; // 0.5 мс - период таймера 14. Расчет: (TIM_ARR * TIM_PSC) / TIM_FREQ / ) = ((499+1) * (59+1)) / 60 000 000 = 0,0005 с = 0.5 мс
+		if (((pid_time >= TIME_INTERVAL_MS)&&(cnt_hall >= 5))||(pid_time >= 2000)) {
+			calculateSpeed();
+//			calculatePID();
+			pid_time = TIM14->CNT*0.001;
+		}
+	}
+}
+
+//////////////////////////////////////////////////
+//////////////////////////////////////////////////
+
+// функция - инициализация
+void start(){
+	initialize_PID_constants();
+	START_FLAG=1;
+	HAL_TIM_Base_Start_IT(&htim14);
+	cur_sector();
+	motor_control(Eright, pwm);
+}
+
+// Бесконечный цикл
+void loop(){
+
+}
+
+// Функции обмоток
 void coil_AC(uint16_t pwm) { //1
 	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
 	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
@@ -110,154 +312,3 @@ void coil_BC(uint16_t pwm) { //6
 	HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_1);
 }
 
-void motor_control(uint8_t command, uint16_t pwm) {
-	switch (command) {
-		case Eright:
-			switch (step) {
-			case 0b100:
-				coil_BC(pwm); 	// A+1 B-0.5 C0
-				break;
-			case 0b101:
-				coil_BA(pwm);	// A+0.5 B0 C-1
-				break;
-			case 0b001:
-				coil_CA(pwm); 	// A0 B+1 C-0.5
-				break;
-			case 0b011:
-				coil_CB(pwm);	// A-1 B+0.5 C0
-				break;
-			case 0b010:
-				coil_AB(pwm); 	// A-0.5 B0 C+1
-				break;
-			case 0b110:
-				coil_AC(pwm); 	// A0 B-1 C+0.5
-				break;
-			default:
-				break;
-			}
-			break;
-
-		case Estop:
-			HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
-			HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
-
-			HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
-			HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
-
-			HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
-			HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
-			break;
-//		case Eleft: 		//НЕ РАБОТАЕТ. НАДО ПОДУМАТЬ КАКИМ ОБРАЗОМ СДЕЛАТЬ
-//			switch (step) {
-//			case 0b100:
-//				coil_BC(pwm); 	// A+1 B-0.5 C0
-//				break;
-//			case 0b101:
-//				coil_BA(pwm);	// A+0.5 B0 C-1
-//				break;
-//			case 0b001:
-//				coil_CA(pwm); 	// A0 B+1 C-0.5
-//				break;
-//			case 0b011:
-//				coil_CB(pwm);	// A-1 B+0.5 C0
-//				break;
-//			case 0b010:
-//				coil_AB(pwm); 	// A-0.5 B0 C+1
-//				break;
-//			case 0b110:
-//				coil_AC(pwm); 	// A0 B-1 C+0.5
-//				break;
-//			default:
-//				break;
-//			}
-//
-//			break;
-
-		default:
-			break;
-	}
-}
-
-void cur_sector() {
-	hal_U = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_5);
-	hal_V = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_0);
-	hal_W = HAL_GPIO_ReadPin(GPIOA,GPIO_PIN_1);
-
-	step = (hal_W) | (hal_V << 1) | (hal_U << 2);
-}
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-	switch(GPIO_Pin) {
-	case GPIO_PIN_5:
-	case GPIO_PIN_0:
-	case GPIO_PIN_1:
-		if (START_FLAG!=0){
-			cnt_hall += 1;
-			cur_sector();
-			motor_control(Eright, pwm);
-		}
-		break;
-	}
-}
-
-#define PULSES_PER_REVOLUTION 	6
-#define GEAR_RATIO 				28 // Передаточное число
-#define STEPS_REDUCER 			2
-#define REDUCER_LENGTH 			47.4 // Длина ротора?
-
-void calculateSpeed() {
-//	currentSpeed = (cnt_hall * 60.0 * GEAR_RATIO) / (PULSES_PER_REVOLUTION * REDUCER_LENGTH); // Текущая скорость в об/мин
-//	currentSpeed = (cnt_hall * 60.0 * REDUCER_LENGTH) / (PULSES_PER_REVOLUTION * GEAR_RATIO);
-	currentSpeed = cnt_hall * 3.571428; // Текущая скорость в об/мин. Расчет: 60 c / 16.8 = 3.571428, где  336 * 0.05 = 16.8 - кол-во прерываний датчика холла за 0.05 с, для вращения со скоростью 1 об/с
-	cnt_hall = 0; // Сброс счетчика импульсов
-}
-
-void calculatePID() {
-    error = targetRPM - currentSpeed;
-    integral += error;
-    derivative = error - lastError;
-
-    pwm = Kp*error + Ki*integral + Kd*derivative;
-    if (pwm > 3751) pwm = 3751;
-    if (pwm < 0) pwm = 2700;
-    lastError = error;
-}
-
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
-
-
-	if (htim == &htim14) {
-		time_50_ms += 0.5; // 0.5 мс - период таймера 14. Расчет: 1/ (TIM_FREQ / (TIM_ARR * TIM_PSC)) = 1 / (60 000 000 / ((499+1) * (59+1))) = 1/2000 = 0.5 мс
-//		cur_sector();
-		if (time_50_ms >= TIME_INTERVAL_MS) {
-			calculateSpeed();
-			calculatePID();
-			time_50_ms = 0;
-		}
-//		motor_control(Eright, pwm);
-
-
-	}
-}
-
-void loop(){
-//	if(pwm < 3700) {
-//		pwm += 2;
-//		HAL_Delay(100);
-//	}
-}
-
-void start(){
-//	coil_BA(pwm);
-//	HAL_Delay(100);
-//	coil_CA(pwm);
-//	HAL_Delay(100);
-//	cnt_hall=0;
-	START_FLAG=1;
-	HAL_TIM_Base_Start_IT(&htim14);
-	coil_BA(pwm);
-	HAL_Delay(100);
-	coil_CA(pwm);
-	HAL_Delay(100);
-
-}
