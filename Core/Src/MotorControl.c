@@ -19,7 +19,7 @@ uint8_t step = 0;
 
 float U_PWM, V_PWM, W_PWM; // ШИМ на обмотках
 
-uint16_t pwm = 2650; //2650 - для тестов; 2600 - порог минимальной скорости вращения? Потребление 0.14А; 3750 - Максимальный ШИМ. Огромный ток.
+uint16_t pwm = 3000; //2650 - для тестов; 2600 - порог минимальной скорости вращения? Потребление 0.14А; 3750 - Максимальный ШИМ. Огромный ток.
 
 bool START_FLAG = 0;
 
@@ -28,9 +28,9 @@ float K = 3.5;
 float Kp;// = 1.1;// = 0.6 * K;
 float Ki;// = 0.4;// = (2 * Kp)/50;
 float Kd;// = 0.6;// = (Kp * 50)/8;
-float TIME_INTERVAL_MS = 50; // Интервал расчета ПИД
+float TIME_INTERVAL_MS = 100; // Интервал расчета ПИД
 
-float targetRPM = 15;
+float targetRPM = 60;
 float currentSpeed = 0.0;     // текущая скорость в RPM
 float error, lastError;
 float integral, derivative;
@@ -38,7 +38,7 @@ float integral, derivative;
 float pid_time = 0;
 
 void initialize_PID_constants() {
-	Kp = 0.6 * K;
+	Kp = 30;
 	Ki = (2 * Kp) / TIME_INTERVAL_MS;
     Kd = (Kp * TIME_INTERVAL_MS) / 8;
 }
@@ -103,7 +103,7 @@ void move_rotor(float to_angle) {
 }
 
 // Функция, управляющая последовательностью переключением обмоток двигателя
-float offset = 0;
+float offset = -60;
 void motor_control(uint8_t command, uint16_t pwm) {
 	switch (command) {
 		case Eright:
@@ -214,7 +214,17 @@ void calculatePID() {
     integral += error;
     derivative = error - lastError;
 
-    pwm = Kp*error + Ki*integral + Kd*derivative;
+    float tmp_pwm = Kp*error + Ki*integral + Kd*derivative;
+    if ((tmp_pwm - pwm) > 0) {
+    	if ((tmp_pwm - pwm) > 50) {
+    		pwm += 50;
+    	}
+    }
+    else {
+		if ((tmp_pwm - pwm) < -50) {
+			pwm -= 50;
+		}
+    }
     if (pwm > 3751) pwm = 3751;
     if (pwm < 0) pwm = 2700;
     lastError = error;
@@ -227,7 +237,8 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 		pid_time += 0.5; // 0.5 мс - период таймера 14. Расчет: (TIM_ARR * TIM_PSC) / TIM_FREQ / ) = ((499+1) * (59+1)) / 60 000 000 = 0,0005 с = 0.5 мс
 		if (((pid_time >= TIME_INTERVAL_MS)&&(cnt_hall >= 5))||(pid_time >= 2000)) {
 			calculateSpeed();
-//			calculatePID();
+			calculatePID();
+			motor_control(Eright, pwm);
 			pid_time = TIM14->CNT*0.001;
 		}
 	}
