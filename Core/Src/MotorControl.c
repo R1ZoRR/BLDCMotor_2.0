@@ -12,6 +12,7 @@
 #define NUMBER_OF_POLE 		  4
 #define GEAR_RATIO	   		  28
 
+extern ADC_HandleTypeDef hadc1;
 
 const uint8_t commutationTable[6] = {0b100, 0b101, 0b001, 0b011, 0b010, 0b110};
 
@@ -230,7 +231,11 @@ void calculatePID() {
     lastError = error;
 }
 
-bool angleFlag = 0;
+// Для АЦП
+uint16_t rawValues[3];
+bool convComplete = 0;
+
+
 // Обработчик прерываний таймера
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 	if (htim == &htim14) {
@@ -240,8 +245,28 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 			calculatePID();
 			motor_control(Eright, pwm);
 			pid_time = TIM14->CNT*0.001;
+
 		}
 	}
+}
+
+float result1 = 0;
+float result2 = 0;
+float result3 = 0;
+float summ = 0;
+
+// Обработчик прерываний АЦП
+float Sensitivity_I = 0.0066; // Чувствительность датчика тока в мВ/мА
+
+// Обработка показаний АЦП по готовности всех 3-х каналов
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
+	// где rawValues - показания АЦП; 3.3 В - питание АПЦ; 4096 - количество уровней квантования при 12 разрядах; ((5.62+10)/10)) - компенсация делителя напряжения; 2.5 В - компинсация кривой датчика тока;
+	// Расчет: (((2000*3.3)/4096)*(5.62+10)/10-2.5)/0.0066 = 2,56 мА; (((2000*3.3)/4096)*(5.62+10)/10-2.5)/0.0066-6,9739139441
+	result1 = ((rawValues[0] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	result2 = ((rawValues[1] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	result3 = ((rawValues[2] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	summ = result1 + result2 + result3;
+	bool convComplete = 1;
 }
 
 //////////////////////////////////////////////////
@@ -252,6 +277,7 @@ void start(){
 	initialize_PID_constants();
 	START_FLAG=1;
 	HAL_TIM_Base_Start_IT(&htim14);
+	HAL_ADC_Start_DMA(&hadc1, (uint16_t*)rawValues, 3);
 	cur_sector();
 	motor_control(Eright, pwm);
 }
@@ -260,66 +286,3 @@ void start(){
 void loop(){
 
 }
-
-// Функции обмоток
-void coil_AC(uint16_t pwm) { //1
-	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
-	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
-
-	TIM1->CCR1 = pwm/2;
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-
-	TIM8->CCR1 = pwm;
-    HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_1);
-}
-void coil_AB(uint16_t pwm) { //2
-	TIM1->CCR1 = pwm;
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
-
-	TIM1->CCR2 = pwm/2;
-    HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
-
-	HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
-	HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
-}
-void coil_CB(uint16_t pwm) { //3
-	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
-	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
-
-	TIM1->CCR2 = pwm;
-	HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
-
-	TIM8->CCR1 = pwm/2;
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
-}
-void coil_CA(uint16_t pwm) { //4
-	TIM1->CCR1 = pwm/2;
-	HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
-
-	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
-	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
-
-	TIM8->CCR1 = pwm;
-	HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
-}
-void coil_BA(uint16_t pwm) { //5
-	TIM1->CCR1 = pwm;
-	HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
-
-	TIM1->CCR2 = pwm/2;
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-
-	HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
-	HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
-}
-void coil_BC(uint16_t pwm) { //6
-	HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
-	HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
-
-	TIM1->CCR2 = pwm;
-	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
-
-	TIM8->CCR1 = pwm/2;
-	HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_1);
-}
-
