@@ -20,7 +20,7 @@ uint8_t step = 0;
 
 float U_PWM, V_PWM, W_PWM; // ШИМ на обмотках
 
-uint16_t pwm = 3000; //2650 - для тестов; 2600 - порог минимальной скорости вращения? Потребление 0.14А; 3750 - Максимальный ШИМ. Огромный ток.
+uint16_t pwm = 2600; //2650 - для тестов; 2600 - порог минимальной скорости вращения? Потребление 0.14А; 3750 - Максимальный ШИМ. Огромный ток.
 
 bool START_FLAG = 0;
 
@@ -30,13 +30,23 @@ float Kp;// = 1.1;// = 0.6 * K;
 float Ki;// = 0.4;// = (2 * Kp)/50;
 float Kd;// = 0.6;// = (Kp * 50)/8;
 float TIME_INTERVAL_MS = 100; // Интервал расчета ПИД
+float TIME_PWM_MS = 2;
 
 float targetRPM = 60;
-float currentSpeed = 0.0;     // текущая скорость в RPM
+float currentSpeed = 0;     // текущая скорость в RPM
 float error, lastError;
 float integral, derivative;
 
 float pid_time = 0;
+
+float I_a = 0;
+float I_b = 0;
+float I_c = 0;
+float I_alpha = 0;
+float I_beta = 0;
+float I_d = 0;
+float I_q = 0;
+float summ = 0;
 
 void initialize_PID_constants() {
 	Kp = 30;
@@ -53,47 +63,43 @@ uint16_t cnt_hall_last = 0;
 // Функция изменяет ШИМ в соответсвии с указанным вектором тяги
 void move_rotor(float to_angle) {
 	// Расчет потенциалов и заполнения шима для фаз
-	U_PWM = pwm*(sin((to_angle) * M_PI/180));
-	V_PWM = pwm*(sin((to_angle+120) * M_PI/180));
-	W_PWM = pwm*(sin((to_angle+240) * M_PI/180));
-
-	TIM1->CCR1 = 0;
-	TIM1->CCR2 = 0;
-	TIM8->CCR1 = 0;
+	U_PWM = pwm*(sin((to_angle)     * M_PI/180) + sin((to_angle)     * M_PI/60)/4);
+	V_PWM = pwm*(sin((to_angle+120) * M_PI/180) + sin((to_angle+120) * M_PI/60)/4);
+	W_PWM = pwm*(sin((to_angle+240) * M_PI/180) + sin((to_angle+240) * M_PI/60)/4);
 
 	/////////////////////////////////
 	// Перенастройка шима на фазах
 
 	if(U_PWM >= 0) { // if, т. к. позитивными и негативными ключами управляют разные каналы таймеров
 		HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_1);
-		TIM1->CCR1 = U_PWM;
+		TIM1->CCR1 = (uint16_t)U_PWM;
 		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 	}
 	else {
 		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
-		TIM1->CCR1 = -U_PWM;
+		TIM1->CCR1 = (uint16_t)(-U_PWM);
 		HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_1);
 	}
 
 	if(V_PWM >= 0) {
 		HAL_TIMEx_PWMN_Stop(&htim1, TIM_CHANNEL_2);
-		TIM1->CCR2 = V_PWM;
+		TIM1->CCR2 = (uint16_t)V_PWM;
 		HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
 	}
 	else {
 		HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
-		TIM1->CCR2 = -V_PWM;
+		TIM1->CCR2 = (uint16_t) (-V_PWM);
 		HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
 	}
 
 	if(W_PWM >= 0) {
 		HAL_TIMEx_PWMN_Stop(&htim8, TIM_CHANNEL_1);
-		TIM8->CCR1 = W_PWM;
+		TIM8->CCR1 = (uint16_t)W_PWM;
 		HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);
 	}
 	else {
 		HAL_TIM_PWM_Stop(&htim8, TIM_CHANNEL_1);
-		TIM8->CCR1 = -W_PWM;
+		TIM8->CCR1 = (uint16_t) (-W_PWM);
 		HAL_TIMEx_PWMN_Start(&htim8, TIM_CHANNEL_1);
 	}
 
@@ -104,30 +110,34 @@ void move_rotor(float to_angle) {
 }
 
 // Функция, управляющая последовательностью переключением обмоток двигателя
-float offset = -60;
+float offset = -180; // Датчики развернуты на +26.5 градусов отностительно статора; сдвиг в меньше 27- движение по часовой, в больше - против часовой
 void motor_control(uint8_t command, uint16_t pwm) {
 	switch (command) {
 		case Eright:
 			switch (step) {
-			case 0b101:
-				move_rotor(0 + offset);
-				break;
-			case 0b100:
+			case 0b101: // 5
+//				move_rotor(0 + offset);
 				move_rotor(60 + offset);
 				break;
-			case 0b110:
-				move_rotor(120 + offset);
+			case 0b001: // 1
+//				move_rotor(60 + offset);
+				move_rotor(60 + offset);
 				break;
-			case 0b010:
-				move_rotor(180 + offset);
-				break;
-			case 0b011:
-				move_rotor(240 + offset);
-				break;
-			case 0b001:
-				move_rotor(300 + offset);
-				break;
+			case 0b011: // 3
+//				move_rotor(120 + offset);
+				move_rotor(60 + offset);
 
+				break;
+			case 0b010: // 2
+				move_rotor(-60 + offset);
+				break;
+			case 0b110: // 6
+				move_rotor(-60 + offset);
+				break;
+			case 0b100: // 4
+//				move_rotor(300 + offset);
+				move_rotor(-60 + offset);
+				break;
 			default:
 				break;
 			}
@@ -182,10 +192,9 @@ void cur_sector() {
 	step = (hal_W) | (hal_V << 1) | (hal_U << 2);
 }
 
-
+float currentAngle = 35;
+float rememberAngle = 0;
 // Обработчик прерываний датчиков Холла
-float currnetAngle = 0;
-float angle = 0;
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	switch(GPIO_Pin) {
 	case GPIO_PIN_5:
@@ -193,9 +202,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	case GPIO_PIN_1:
 		if (START_FLAG!=0){
 			cnt_hall += 1;
-			angle = currnetAngle;
 			cur_sector();
 			motor_control(Eright, pwm);
+			I_alpha = I_a + I_b * (-1/2) + I_c * (-1/2);
+			I_beta = I_b * sqrt(3)/2 + I_c * (-sqrt(3)/2);
+			I_d = 2/3*(cos(currentAngle  * M_PI/180)+sin(currentAngle * M_PI/180));
+			I_q = 2/3*(-sin(currentAngle * M_PI/180)+cos(currentAngle * M_PI/180));
 		}
 		break;
 	}
@@ -220,10 +232,16 @@ void calculatePID() {
     	if ((tmp_pwm - pwm) > 50) {
     		pwm += 50;
     	}
+    	else {
+    		pwm += tmp_pwm - pwm;
+    	}
     }
     else {
 		if ((tmp_pwm - pwm) < -50) {
 			pwm -= 50;
+		}
+		else {
+			pwm += tmp_pwm - pwm;
 		}
     }
     if (pwm > 3751) pwm = 3751;
@@ -233,40 +251,50 @@ void calculatePID() {
 
 // Для АЦП
 uint16_t rawValues[3];
-bool convComplete = 0;
 
 
+float TIME_PWM = 0;
+float cnt_hall_max = 0;
+float offset_increment = 0.002;
 // Обработчик прерываний таймера
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 	if (htim == &htim14) {
 		pid_time += 0.5; // 0.5 мс - период таймера 14. Расчет: (TIM_ARR * TIM_PSC) / TIM_FREQ / ) = ((499+1) * (59+1)) / 60 000 000 = 0,0005 с = 0.5 мс
-		if (((pid_time >= TIME_INTERVAL_MS)&&(cnt_hall >= 5))||(pid_time >= 2000)) {
+		TIME_PWM += 0.5;
+
+		if (cnt_hall >= 2000) { // (pid_time >= TIME_INTERVAL_MS)||(cnt_hall >= 500)
+			cnt_hall_max = cnt_hall;
 			calculateSpeed();
-			calculatePID();
-			motor_control(Eright, pwm);
-			pid_time = TIM14->CNT*0.001;
+//			calculatePID();
+			pid_time = 0;
+			offset += offset_increment;
 
 		}
+
+		if (TIME_PWM >= TIME_PWM_MS) {
+//			currentAngle += 5;// targetRPM * 360 / (60 * 20)
+			currentAngle = fmodf(currentAngle, 360);
+
+			motor_control(Eright, pwm);
+			TIME_PWM = 0;
+		}
+
+
+
 	}
 }
-
-float result1 = 0;
-float result2 = 0;
-float result3 = 0;
-float summ = 0;
 
 // Обработчик прерываний АЦП
 float Sensitivity_I = 0.0066; // Чувствительность датчика тока в мВ/мА
 
 // Обработка показаний АЦП по готовности всех 3-х каналов
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
-	// где rawValues - показания АЦП; 3.3 В - питание АПЦ; 4096 - количество уровней квантования при 12 разрядах; ((5.62+10)/10)) - компенсация делителя напряжения; 2.5 В - компинсация кривой датчика тока;
+	// где rawValues - показания АЦП; 3.3 В - питание АПЦ; 4096 - количество уровней квантования при 12 разрядах; ((5.62+10)/10)) - компенсация нормирующего делителя напряжения; 2.5 В - компинсация кривой датчика тока (точка отсчета 0 мА);
 	// Расчет: (((2000*3.3)/4096)*(5.62+10)/10-2.5)/0.0066 = 2,56 мА; (((2000*3.3)/4096)*(5.62+10)/10-2.5)/0.0066-6,9739139441
-	result1 = ((rawValues[0] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
-	result2 = ((rawValues[1] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
-	result3 = ((rawValues[2] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
-	summ = result1 + result2 + result3;
-	bool convComplete = 1;
+	I_a = ((rawValues[0] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	I_b = ((rawValues[1] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	I_c = ((rawValues[2] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
+	summ = I_a + I_b + I_c;
 }
 
 //////////////////////////////////////////////////
@@ -277,9 +305,10 @@ void start(){
 	initialize_PID_constants();
 	START_FLAG=1;
 	HAL_TIM_Base_Start_IT(&htim14);
-	HAL_ADC_Start_DMA(&hadc1, (uint16_t*)rawValues, 3);
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)rawValues, 3);
 	cur_sector();
-	motor_control(Eright, pwm);
+//	move_rotor(0);
+//	motor_control(Eright, pwm);
 }
 
 // Бесконечный цикл
