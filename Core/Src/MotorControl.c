@@ -32,8 +32,8 @@ float K = 3.5;
 float Kp;// = 1.1;// = 0.6 * K;
 float Ki;// = 0.4;// = (2 * Kp)/50;
 float Kd;// = 0.6;// = (Kp * 50)/8;
-float TIME_INTERVAL_MS = 50; // Интервал расчета ПИД
-float TIME_PWM_MS = 0.5;
+float TIME_INTERVAL_MS = 350; // Интервал расчета ПИД
+float TIME_TIM14_MS = 0.25;
 float rotor_angle = 0.0;
 float currentAngle = 0.0;
 
@@ -58,9 +58,9 @@ float I_q = 0;
 float summ = 0;
 
 void initialize_PID_constants() {
-	Kp = 0.01;
-	Ki = 1;
-    Kd = 0.5;
+	Kp = 0.001;
+	Ki = 2;
+    Kd = 0.1;
 }
 
 ///
@@ -72,9 +72,10 @@ uint16_t cnt_hall_last = 0;
 // Функция изменяет ШИМ в соответсвии с указанным вектором тяги
 void move_rotor(float to_angle) {
 	// Расчет потенциалов и заполнения шима для фаз
-	U_PWM = pwm*(sin((to_angle)     * M_PI/180) + sin((to_angle)     * M_PI/60)/4);
-	V_PWM = pwm*(sin((to_angle+240) * M_PI/180) + sin((to_angle+240) * M_PI/60)/4);
-	W_PWM = pwm*(sin((to_angle+120) * M_PI/180) + sin((to_angle+120) * M_PI/60)/4);
+	U_PWM = pwm*1.122263439*(sin((to_angle)     * M_PI/180) + sin((to_angle)     * M_PI/60)/4);
+	V_PWM = pwm*1.122263439*(sin((to_angle+120) * M_PI/180) + sin((to_angle+120) * M_PI/60)/4);
+	W_PWM = pwm*1.122263439*(sin((to_angle+240) * M_PI/180) + sin((to_angle+240) * M_PI/60)/4);
+
 	/////////////////////////////////
 	// Перенастройка шима на фазах
 
@@ -120,7 +121,7 @@ void move_rotor(float to_angle) {
 
 
 // Функция, управляющая последовательностью переключением обмоток двигателя
-float offset = 30; // Датчики развернуты на +26.5 градусов отностительно статора; сдвиг в меньше 27- движение по часовой, в больше - против часовой
+float offset = 90; // Датчики развернуты на +26.5 градусов отностительно статора; сдвиг в меньше 27- движение по часовой, в больше - против часовой
 uint8_t next_step;
 uint16_t error_hall;
 void motor_control(uint8_t command, uint16_t pwm) {
@@ -134,13 +135,13 @@ void motor_control(uint8_t command, uint16_t pwm) {
 				move_rotor(currentAngle);
 				break;
 			case 0b100: // Состояние 4
-				rotor_angle = 90;
+				rotor_angle = 330;
 				next_step = 0b101;
 				currentAngle = rotor_angle + offset;
 				move_rotor(currentAngle);
 				break;
 			case 0b110: // Состояние 6
-				rotor_angle = 150;
+				rotor_angle = 270;
 				next_step = 0b100;
 				currentAngle = rotor_angle + offset;
 				move_rotor(currentAngle);
@@ -152,13 +153,13 @@ void motor_control(uint8_t command, uint16_t pwm) {
 				move_rotor(currentAngle);
 				break;
 			case 0b011: // Состояние 3
-				rotor_angle = 270;
+				rotor_angle = 150;
 				next_step = 0b010;
 				currentAngle = rotor_angle + offset;
 				move_rotor(currentAngle);
 				break;
 			case 0b001: // Состояние 1
-				rotor_angle = 330;
+				rotor_angle = 90;
 				next_step = 0b011;
 				currentAngle = rotor_angle + offset;
 				move_rotor(currentAngle);
@@ -235,7 +236,7 @@ void calculatePID(float time) {
     tmp_pwm = Kp*error + Ki*integral + Kd*derivative;
     pwm = tmp_pwm;
     if (pwm > 1499) pwm = 1499;
-    if (pwm < 500) pwm = 500;
+    if (pwm < 0) pwm = 0;
     lastError = error;
 }
 
@@ -246,12 +247,14 @@ uint16_t rawValues[3];
 int j = 0;
 
 float rememberAngle = 0;
-volatile uint32_t start_time = 0;
-volatile uint32_t end_time = 0;
-volatile uint32_t elapsed_time = 0;
-volatile uint32_t overflow_count = 0;
-volatile uint8_t flag = 0;
-float time = 0.0;
+uint32_t start_time = 0;
+uint32_t end_time = 0;
+uint32_t elapsed_time = 0;
+uint32_t elapsed_time_summ = 0;
+uint32_t overflow_count = 0;
+time = 0.0;
+
+int counter = 0;
 // Обработчик прерываний датчиков Холла
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 	switch(GPIO_Pin) {
@@ -264,15 +267,25 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 			else error_hall++;
 			end_time = __HAL_TIM_GET_COUNTER(&htim14);    // Считываем конечное время
 			if (end_time >= start_time) {
-				elapsed_time = end_time - start_time + (overflow_count * (499 + 1));  // Вычисляем прошедшее время
+				elapsed_time = end_time - start_time + (overflow_count * (14999 + 1));  // Вычисляем прошедшее время
 			} else {
-				elapsed_time = ((499 + 1) - start_time + end_time) + (overflow_count * (499 + 1));  // Вычисляем прошедшее время с учетом переполнения
+				elapsed_time = ((14999 + 1) - start_time + end_time) + (overflow_count * (14999 + 1));  // Вычисляем прошедшее время с учетом переполнения
 			}
 			start_time = end_time;
 			overflow_count = 0;
-			time = 0.5*(elapsed_time/(499 + 1));
-			calculateSpeed(1, time);
+
+			elapsed_time_summ += elapsed_time;
+			counter++;
+			if (counter>=6) {
+				time = TIME_TIM14_MS*(elapsed_time_summ/(14999 + 1));
+				calculateSpeed(6, time);
+				elapsed_time_summ = 0;
+				counter = 0;
+			}
+
 			motor_control(Eright, pwm);
+
+
 //			I_alpha = I_a + I_b * (-1/2) + I_c * (-1/2);
 //			I_beta = I_b * sqrt(3)/2 + I_c * (-sqrt(3)/2);
 //			I_d = 2/3*(cos(currentAngle  * M_PI/180)+sin(currentAngle * M_PI/180));
@@ -287,10 +300,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 // Обработчик прерываний таймера
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 	if (htim == &htim14) {
-		pid_time += 0.5; // 0.5S мс - период таймера 14. Расчет: (TIM_ARR * TIM_PSC) / TIM_FREQ / ) = ((499+1) * (59+1)) / 60 000 000 = 0,0005 с = 0.5 мс
+		pid_time += TIME_TIM14_MS; // TIME_TIM14_MS мс - период таймера 14. Расчет: (TIM_ARR * TIM_PSC) / TIM_FREQ / ) = ((499+1) * (59+1)) / 60 000 000 = 0,0005 с = 0.5 мс
 		overflow_count++;
-		if (overflow_count>(1000/((targetRPM/60)*336)/0.5)){
-			time = 0.5*(((499 + 1) - start_time + (overflow_count * (499 + 1)))/(499 + 1));
+		if (overflow_count>(6*1000/((targetRPM/60)*336)/TIME_TIM14_MS)){
+			time = TIME_TIM14_MS*(((14999 + 1) - start_time + (overflow_count * (14999 + 1)))/(14999 + 1));
 			calculateSpeed(1, time);
 		}
 		if(pid_time >= TIME_INTERVAL_MS) { // (pid_time >= TIME_INTERVAL_MS)||(cnt_hall >= 500)
@@ -298,7 +311,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 			pid_time = 0;
 		}
 
-		currentAngle += (((targetRPM*2)/60) * 360) / (2000);// targetRPM * 360 / (60 * 20)
+		currentAngle += (((targetRPM*56)/60) * 360) / (1/(TIME_TIM14_MS/1000));// targetRPM * 360 / (60 * 20)
+		if ((currentAngle>(rotor_angle+90))&&(currentSpeed>1)) currentAngle = fmodf(rotor_angle+60, 360);
+		else currentAngle = fmodf(currentAngle, 360);
 		move_rotor(currentAngle);
 	}
 }
