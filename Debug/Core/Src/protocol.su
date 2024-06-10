@@ -1,0 +1,5 @@
+protocol.c:22:6:protocolReceive	16	static
+protocol.c:30:10:calculateCRC	24	static
+protocol.c:52:6:protocolParser	16	static
+protocol.c:112:6:listening	8	static
+protocol.c:117:6:HAL_UART_RxCpltCallback	16	static

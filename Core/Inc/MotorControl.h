@@ -14,8 +14,14 @@
 #define SRC_MOTORCONTROL_H_
 
 extern TIM_HandleTypeDef htim1;
+extern TIM_HandleTypeDef htim2;
+extern TIM_HandleTypeDef htim3;
 extern TIM_HandleTypeDef htim8;
 extern TIM_HandleTypeDef htim14;
+extern ADC_HandleTypeDef hadc1;
+extern ADC_HandleTypeDef hadc2;
+extern ADC_HandleTypeDef hadc3;
+extern uint16_t receiveCounter;
 /* Щеточный, щеточный мотор... Не баловство...
 void forward();
 void reverse();

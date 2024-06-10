@@ -6,15 +6,12 @@
  */
 #include "main.h"
 #include "MotorControl.h"
+#include "protocol.h"
 #include "stdbool.h"
 
 #define M_PI 				  3.14159265358979323846
 #define NUMBER_OF_POLE 		  4
 #define GEAR_RATIO	   		  28
-
-extern ADC_HandleTypeDef hadc1;
-
-
 
 const uint8_t commutationTable[6] = {0b100, 0b101, 0b001, 0b011, 0b010, 0b110};
 
@@ -316,11 +313,15 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef* htim) {
 		else currentAngle = fmodf(currentAngle, 360);
 		move_rotor(currentAngle);
 	}
+	if (htim == &htim3) {
+		protocolParser();
+		receiveCounter = 0;
+	}
 }
 
 
 // Обработчик прерываний АЦП
-float Sensitivity_I = 0.0066; // Чувствительность датчика тока в мВ/мА
+float Sensitivity_I = 0.066; // Чувствительность датчика тока в мВ/мА
 
 // Обработка показаний АЦП по готовности всех 3-х каналов
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
@@ -330,14 +331,12 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc) {
 	I_b = ((rawValues[1] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
 	I_c = ((rawValues[2] * 3.3 / 4096) * (5.62+10) / 10 - 2.5) / Sensitivity_I;
 	summ = I_a + I_b + I_c;
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t*)rawValues, 3);
 }
 
 //////////////////////////////////////////////////
 //////////////////////////////////////////////////
 
-uint16_t VU[360];
-uint16_t VV[360];
-uint16_t VW[360];
 
 // функция - инициализация
 void start(){
@@ -352,4 +351,5 @@ void start(){
 
 // Бесконечный цикл
 void loop(){
+	listening();
 }
